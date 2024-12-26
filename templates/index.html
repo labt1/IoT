@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Vigilancia</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav>
+        <div class="navbar">
+            <h1>HawkEye: Sistema de Vigilancia</h1>
+        </div>
+    </nav>
+
+    <form id="upload-form" method="POST" enctype="multipart/form-data">
+        <label for="camera_id">Selecciona un Slot (1-6):</label>
+        <input type="number" id="camera_id" name="camera_id" min="1" max="6" value="1" required>
+        <br><br>
+        <label for="video">Selecciona un video:</label>
+        <input type="file" id="video" name="video" accept="video/*" required>
+        <br><br>
+        <button type="submit">Subir Video</button>
+    </form>
+
+    <div id="main">
+        <div id="cameras">
+            <img id="camera_1_frame" src="/video_feed/0" alt="Camera 1">
+            <img id="camera_2_frame" src="/video_feed/1" alt="Camera 2">
+        </div>
+        <div id="cameras">
+            <img id="camera_3_frame" src="/video_feed/2" alt="Camera 3">
+            <img id="camera_4_frame" src="/video_feed/3" alt="Camera 4">
+        </div>
+        <div id="cameras">
+            <img id="camera_5_frame" src="/video_feed/4" alt="Camera 5">
+            <img id="camera_6_frame" src="/video_feed/5" alt="Camera 6">
+        </div>
+
+        <div id="results">
+            <h2>Resultados de Búsqueda</h2>
+            <form id="search-form">
+                <label for="object_label">Buscar objeto:</label>
+                
+                <div id="search-container">
+                    <input type="text" id="object_label" name="object_label" placeholder="Ej. person" autocomplete="off" required>
+                    <div id="dropdown" class="dropdown hidden">
+                        <!-- Aquí aparecerán las opciones filtradas -->
+                    </div>
+                </div>
+
+                <label for="time_interval">Intervalo:</label>
+                <input type="text" id="time_interval" name="time_interval" placeholder="En segundos" value="5" required>
+                <button type="submit">Buscar</button>
+            </form>
+            <div id="result-list"></div>
+        </div>
+    </div>
+
+    
+
+    <script>
+        
+        //const socket = io();
+        var socket = io.connect('http://' + document.domain + ':' + location.port);
+        console.log('Connecting to WebSocket server CAMERA...');
+
+        document.getElementById('upload-form').addEventListener('submit', function(event) {
+        event.preventDefault(); // Evita el cambio de ruta
+
+        const formData = new FormData(this);
+        fetch('/upload_video', {
+            method: 'POST',
+            body: formData,
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(data.message);
+                location.reload(); // Recargar la página principal para actualizar los streams
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+            .catch(error => console.error('Error:', error));
+        });
+
+
+        // Función para buscar detecciones
+        const objectList = ["persona","bicicleta","coche","motocicleta","avión","autobús","tren","camión","barco","semáforo","bocadeincendios","señaldestop",
+        "parquímetro","banco","pájaro","gato","perro","caballo","oveja","vaca","elefante","oso","cebra","jirafa","mochila","paraguas","bolso","corbata","maleta",
+        "frisbee","esquís","tabladesnowboard","pelotadeportiva","cometa","batedebéisbol","guantedebéisbol","monopatín","tabladesurf","raquetadetenis","botella",
+        "copadevino","taza","tenedor","cuchillo","cuchara","cuenco","plátano","manzana","sándwich","naranja","brócoli","zanahoria","perritocaliente","pizza",
+        "donut","pastel","silla","sofá","plantaenmaceta","cama","mesadecomedor","inodoro","televisión","portátil","ratón","mandoadistancia","teclado",
+        "móvilteléfono","microondas","horno","tostadora","fregadero","nevera","libro","reloj","jarrón","tijeras","osodepeluche","secadordepelo","cepillodedientes"];
+
+        const input = document.getElementById('object_label');
+        const dropdown = document.getElementById('dropdown');
+        const searchForm = document.getElementById('search-form');
+
+        function getObjectIndex(objectLabel) {
+            const objectIndex = objectList.indexOf(objectLabel.toLowerCase());
+            return objectIndex !== -1 ? objectIndex : null;
+        }
+
+        // Mostrar y filtrar la lista
+        input.addEventListener('input', () => {
+            const searchText = input.value.toLowerCase();
+            dropdown.innerHTML = ''; // Limpiar el dropdown previo
+
+            if (searchText) {
+                const filteredObjects = objectList.filter(item =>
+                    item.toLowerCase().includes(searchText)
+                );
+
+                if (filteredObjects.length > 0) {
+                    dropdown.classList.remove('hidden');
+                    filteredObjects.forEach(item => {
+                        const div = document.createElement('div');
+                        div.classList.add('dropdown-item');
+                        div.textContent = item;
+                        dropdown.appendChild(div);
+
+                        // Seleccionar el objeto al hacer clic
+                        div.addEventListener('click', () => {
+                            input.value = item; // Llenar el input con el valor seleccionado
+                            dropdown.classList.add('hidden'); // Ocultar el dropdown
+                        });
+                    });
+                } else {
+                    dropdown.classList.add('hidden');
+                }
+            } else {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        // Ocultar el dropdown si haces clic fuera de él
+        document.addEventListener('click', (event) => {
+            if (!input.contains(event.target) && !dropdown.contains(event.target)) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        // Enviar el formulario
+        searchForm.addEventListener('submit', function(event) {
+            event.preventDefault(); // Evitar el comportamiento por defecto del formulario
+
+            const objectLabel = input.value; // Obtener el valor del objeto seleccionado
+            const timeInterval = document.getElementById('time_interval').value;
+
+            label = getObjectIndex(objectLabel)
+
+            // Validar que el objeto está seleccionado
+            if (!objectLabel) {
+                alert("Por favor selecciona un objeto válido.");
+                return;
+            }
+
+            // Realizar la búsqueda con fetch
+            fetch(`/search_detections?object_label=${label}&time_interval=${timeInterval}`)
+                .then(response => response.json())
+                .then(data => {
+                    const resultList = document.getElementById('result-list');
+                    resultList.innerHTML = ''; // Limpiar los resultados previos
+
+                    if (data.length > 0) {
+                        data.forEach(item => {
+                            const div = document.createElement('div');
+                            div.classList.add('result-item');
+                            div.innerHTML = `
+                                <strong>Cámara ID:</strong> ${item.camera_id} <br>
+                                <strong>Timestamp:</strong> ${item.timestamp} <br>
+                                <strong>Frame:</strong> ${item.frame_number} <br>
+                            `;
+                            resultList.appendChild(div);
+                        });
+                    } else {
+                        resultList.innerHTML = 'No se encontraron resultados.';
+                    }
+                })
+                .catch(error => console.error('Error:', error));
+        });
+
+    </script>
+
+
+</body>
+</html>
